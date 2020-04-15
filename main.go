@@ -31,7 +31,7 @@ const version = "0.3.0"
 func usage(exeType int) {
 	switch exeType {
 	case subExe:
-		log.Printf("Usage: nats-sub [-s server] [-creds file] [-t] <subject>\n")
+		log.Printf("Usage: nats-sub [-s server] [-creds file] [-t] [-q queue] <subject>\n")
 	case reqExe:
 		log.Printf("Usage: nats-req [-s server] [-creds file] [-t] <subject> <request>\n")
 	case repExe:
@@ -97,10 +97,17 @@ func main() {
 	case subExe:
 		subj, i := args[0], 0
 
-		nc.Subscribe(subj, func(msg *nats.Msg) {
-			i++
-			printMsg(msg, i)
-		})
+                if *queue == "NATS-RPLY-22" {
+		  nc.Subscribe(subj, func(msg *nats.Msg) {
+		  	i++
+		  	printMsg(msg, i)
+		  })
+                } else {
+		  nc.QueueSubscribe(subj, *queue, func(msg *nats.Msg) {
+		  	i++
+		  	printMsg(msg, i)
+		  })
+                }
 		nc.Flush()
 		if err := nc.LastError(); err != nil {
 			log.Fatal(err)
