@@ -15,7 +15,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -24,6 +23,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+        
+        "encoding/hex"
 )
 
 const version = "0.3.0"
@@ -31,13 +32,13 @@ const version = "0.3.0"
 func usage(exeType int) {
 	switch exeType {
 	case subExe:
-		log.Printf("Usage: nats-sub [-s server] [-creds file] [-t] [-q queue] <subject>\n")
+		log.Printf("Usage: nats-sub [-s server] [-creds file] [-t] [-hex] [-q queue] <subject>\n")
 	case reqExe:
-		log.Printf("Usage: nats-req [-s server] [-creds file] [-t] <subject> <request>\n")
+		log.Printf("Usage: nats-req [-s server] [-creds file] [-t] [-hex] <subject> <request>\n")
 	case repExe:
-		log.Printf("Usage: nats-rply [-s server] [-creds file] [-t] [-q queue] <subject> <response>\n")
+		log.Printf("Usage: nats-rply [-s server] [-creds file] [-t] [-hex] [-q queue] <subject> <response>\n")
 	default:
-		log.Printf("Usage: nats-pub [-s server] [-creds file] [-t] <subject> <msg>\n")
+		log.Printf("Usage: nats-pub [-s server] [-creds file] [-t] [-hex] <subject> <msg>\n")
 	}
 	flag.PrintDefaults()
 }
@@ -49,6 +50,7 @@ func main() {
 	var showTime = flag.Bool("t", false, "Display timestamps")
 	var showHelp = flag.Bool("h", false, "Show help message")
 	var showVersion = flag.Bool("v", false, "Show version")
+	var useHex = flag.Bool("hex", false, "msg contains hex string")
 
 	exeType := exeType()
 
@@ -100,12 +102,12 @@ func main() {
                 if *queue == "NATS-RPLY-22" {
 		  nc.Subscribe(subj, func(msg *nats.Msg) {
 		  	i++
-		  	printMsg(msg, i)
+		  	printMsg(msg, i, *useHex)
 		  })
                 } else {
 		  nc.QueueSubscribe(subj, *queue, func(msg *nats.Msg) {
 		  	i++
-		  	printMsg(msg, i)
+		  	printMsg(msg, i, *useHex)
 		  })
                 }
 		nc.Flush()
@@ -117,7 +119,16 @@ func main() {
 			log.SetFlags(log.LstdFlags)
 		}
 	case reqExe:
-		subj, reqMsg := args[0], []byte(args[1])
+                var reqMsg = []byte{0}
+		subj, userMsg := args[0], args[1]
+                if *useHex {
+                  reqMsg, err = hex.DecodeString(userMsg)
+                  if err != nil {
+		    log.Fatalf("%v for request", err)
+                  }
+		} else {
+		  reqMsg = []byte(userMsg)
+		}
 		msg, err := nc.Request(subj, reqMsg, 2*time.Second)
 		if err != nil {
 			if nc.LastError() != nil {
@@ -125,12 +136,21 @@ func main() {
 			}
 			log.Fatalf("%v for request", err)
 		}
-		fmt.Printf("%s\n", msg.Data)
+		printMsg(msg, 0, *useHex)
 	case repExe:
-		subj, repMsg, i := args[0], []byte(args[1]), 0
+                var repMsg = []byte{0}
+		subj, userMsg, i := args[0], args[1], 0
+                if *useHex {
+                  repMsg, err = hex.DecodeString(userMsg)
+                  if err != nil {
+		    log.Fatalf("%v for reply", err)
+                  }
+                } else {
+		  repMsg = []byte(userMsg)
+                }
 		nc.QueueSubscribe(subj, *queue, func(msg *nats.Msg) {
 			i++
-			printMsg(msg, i)
+			printMsg(msg, i, *useHex)
 			msg.Respond(repMsg)
 		})
 		nc.Flush()
@@ -142,7 +162,16 @@ func main() {
 			log.SetFlags(log.LstdFlags)
 		}
 	default:
-		subj, msg := args[0], []byte(args[1])
+                var msg = []byte{0}
+		subj, userMsg := args[0], args[1]
+                if *useHex {
+                  msg, err = hex.DecodeString(userMsg)
+                  if err != nil {
+		    log.Fatalf("%v for request", err)
+                  }
+                } else {
+		  msg = []byte(userMsg)
+                }
 		nc.Publish(subj, msg)
 		nc.Flush()
 		if err := nc.LastError(); err != nil {
@@ -155,8 +184,12 @@ func main() {
 	}
 }
 
-func printMsg(m *nats.Msg, i int) {
-	log.Printf("[#%d] Received on [%s]: '%s'", i, m.Subject, m.Data)
+func printMsg(m *nats.Msg, i int, useHex bool) {
+	if (useHex) {  
+		log.Printf("[#%d] Received on [%s]: \n%s", i, m.Subject, hex.Dump(m.Data))
+    } else {
+		log.Printf("[#%d] Received on [%s]: '%s'", i, m.Subject, m.Data)
+    }
 }
 
 // Mostly for nats-sub only.
